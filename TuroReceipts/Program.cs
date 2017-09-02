@@ -1,6 +1,7 @@
 ﻿using CsvHelper;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
+using OpenQA.Selenium.Support.UI;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -32,10 +33,11 @@ namespace TuroReceipts
             Console.WriteLine("Enter the max receipts to fetch:");
             var maxReceiptsInput = Console.ReadLine();
 
-            int maxReceipts = 10;
+            int maxReceipts = 0;
             if (!int.TryParse(maxReceiptsInput, out maxReceipts))
             {
                 Console.WriteLine("Defaulting to 10...");
+                maxReceipts = 10;
             }
 
             IWebDriver webDriver = new ChromeDriver();
@@ -119,20 +121,15 @@ namespace TuroReceipts
                     x.GetAttribute("class").Contains("cancelled"))
                 .ToList();
 
-            var cancelledTripElemenets = tripElements
-                .Where(x => x.GetAttribute("class").Contains("cancelled"))
-                .ToList();
-
-            var cancelledTrips = cancelledTripElemenets.Select(x => x.Text).ToList();
-
             var tripSlugs = tripElements.Where(x => x.GetAttribute("class").Contains("completed"))
                 .Select(x => x.FindElement(By.ClassName("reservation")).GetAttribute("data-href"))
                 .ToList();
 
-            Console.WriteLine("Trip Slugs: {0}", string.Join(",", tripSlugs));
-            Console.WriteLine("Cancelled Trips: {0}", string.Join(",", cancelledTrips));
+            var cancelledTripSlugs = tripElements.Where(x => x.GetAttribute("class").Contains("cancelled"))
+                .Select(x => x.FindElement(By.ClassName("reservation")).GetAttribute("data-href"))
+                .ToList();
 
-            foreach(var tripSlug in tripSlugs)
+            foreach (var tripSlug in tripSlugs)
             {
                 if (trips.Count >= maxReceipts) break;
 
@@ -143,11 +140,11 @@ namespace TuroReceipts
                 }
             }
 
-            foreach (var cancelledTripElemenet in cancelledTripElemenets)
+            foreach (var cancelledTripSlug in cancelledTripSlugs)
             {
                 if (trips.Count >= maxReceipts) break;
 
-                var trip = ProcessCancelledTrip(cancelledTripElemenet);
+                var trip = ProcessCancelledTrip(webDriver, cancelledTripSlug);
                 if (trip != null)
                 {
                     trips.Add(trip);
@@ -166,7 +163,24 @@ namespace TuroReceipts
         /// <returns></returns>
         static Trip GetTrip(IWebDriver webDriver, string reservationUrlSnippet)
         {
+            var reservationId = reservationUrlSnippet.Substring(reservationUrlSnippet.LastIndexOf("/") + 1);
+
+            var tripUrl = string.Format("{0}{1}", TuroBaseUrl, reservationUrlSnippet);
+            Console.WriteLine("Navigating to {0}...", tripUrl);
+            webDriver.Navigate().GoToUrl(tripUrl);
+
+            WebDriverWait wait = new WebDriverWait(webDriver, TimeSpan.FromSeconds(10));
+            wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
+            wait.PollingInterval = TimeSpan.FromMilliseconds(100);
+            wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
+
+            var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
+            var car = carElement.FindElement(By.TagName("div")).Text;
+            var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
+            var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
+
             var receiptUrl = string.Format("{0}{1}/receipt/", TuroBaseUrl, reservationUrlSnippet);
+            Console.WriteLine("Navigating to {0}...", receiptUrl);
             webDriver.Navigate().GoToUrl(receiptUrl);
 
             var pickup = webDriver.FindElement(By.ClassName("reservationSummary-schedulePickUp"));
@@ -224,9 +238,15 @@ namespace TuroReceipts
 
             return new Trip()
             {
+                ReservationId = reservationId,
+                TripUrl = tripUrl,
                 ReceiptUrl = receiptUrl,
-                PickupDateTime = ProcessDateTime(pickup),
-                DropoffDateTime = ProcessDateTime(dropoff),
+                CarUrl = carUrl,
+                CarId = carId,
+                Car = car,
+                Status = "Completed",
+                PickupDateTime = ProcessReservationDateTime(pickup),
+                DropoffDateTime = ProcessReservationDateTime(dropoff),
                 Cost = costAmount,
                 TuroFees = turoFees,
                 Earnings = paymentAmount,
@@ -240,32 +260,40 @@ namespace TuroReceipts
         /// </summary>
         /// <param name="webElement"></param>
         /// <returns></returns>
-        static Trip ProcessCancelledTrip(IWebElement webElement)
+        static Trip ProcessCancelledTrip(IWebDriver webDriver, string reservationUrlSnippet)
         {
-            if (!webElement.Text.Contains("$")) return null;
+            var reservationId = reservationUrlSnippet.Substring(reservationUrlSnippet.LastIndexOf("/") + 1);
 
-            var earnings = 0m;
+            var tripUrl = string.Format("{0}{1}", TuroBaseUrl, reservationUrlSnippet);
+            Console.WriteLine("Navigating to {0}...", tripUrl);
+            webDriver.Navigate().GoToUrl(tripUrl);
 
-            //find where the dollar starts
-            var dollarSymbolIndex = webElement.Text.IndexOf("$");
+            WebDriverWait wait = new WebDriverWait(webDriver, TimeSpan.FromSeconds(10));
+            wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
+            wait.PollingInterval = TimeSpan.FromMilliseconds(100);
+            wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
 
-            //find where a space is after the dollar symbol
-            var spaceOrEndOfStringIndex = webElement.Text.IndexOf(" ", dollarSymbolIndex);
+            var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
+            var car = carElement.FindElement(By.TagName("div")).Text;
+            var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
+            var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
 
-            //if space not found replace with end index of string
-            spaceOrEndOfStringIndex = spaceOrEndOfStringIndex == -1 ? webElement.Text.Length - 1 : spaceOrEndOfStringIndex;
+            var pickup = webDriver.FindElement(By.ClassName("tripSchedule-startDate"));
+            var dropoff = webDriver.FindElement(By.ClassName("tripSchedule-endDate"));
 
-            //find the length of the dollar string
-            var length = spaceOrEndOfStringIndex - dollarSymbolIndex;
-
-            //get the substring for the amount
-            var amount = webElement.Text.Substring(dollarSymbolIndex, length);
-
-            //parse!
-            earnings = ParseCurrency(amount);
+            var earninsText = webDriver.FindElement(By.ClassName("reservationDetails-totalEarnings")).Text;
+            var earnings = ParseCurrency(earninsText);
 
             return new Trip()
             {
+                ReservationId = reservationId,
+                TripUrl = tripUrl,
+                CarUrl = carUrl,
+                CarId = carId,
+                Car = car,
+                Status = "Cancelled",
+                PickupDateTime = ProcessTripScheduleDateTime(pickup),
+                DropoffDateTime = ProcessTripScheduleDateTime(dropoff),
                 Earnings = earnings
             };
         }
@@ -275,10 +303,23 @@ namespace TuroReceipts
         /// </summary>
         /// <param name="webElement"></param>
         /// <returns></returns>
-        static string ProcessDateTime(IWebElement webElement)
+        static string ProcessReservationDateTime(IWebElement webElement)
         {
             var date = webElement.FindElement(By.ClassName("scheduleDate")).Text;
             var time = webElement.FindElement(By.ClassName("scheduleTime")).Text;
+
+            return string.Format("{0} {1}", date, time);
+        }
+
+        /// <summary>
+        /// Processes the trip schedule date time.
+        /// </summary>
+        /// <param name="webElement">The web element.</param>
+        /// <returns></returns>
+        static string ProcessTripScheduleDateTime(IWebElement webElement)
+        {
+            var date = webElement.FindElement(By.ClassName("schedule-date")).Text;
+            var time = webElement.FindElement(By.ClassName("schedule-time")).Text;
 
             return string.Format("{0} {1}", date, time);
         }

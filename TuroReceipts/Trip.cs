@@ -2,7 +2,19 @@
 {
     class Trip
     {
+        public string ReservationId { get; set; }
+
+        public string TripUrl { get; set; }
+
         public string ReceiptUrl { get; set; }
+
+        public string CarUrl { get; set; }
+
+        public string CarId { get; set; }
+
+        public string Car { get; set; }
+
+        public string Status { get; set; }
 
         public string PickupDateTime { get; set; }
 
