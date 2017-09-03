@@ -29,9 +29,7 @@ namespace TuroReceipts
 
         public decimal Earnings { get; set; }
 
-        public decimal ReimbursementTolls { get; set; }
-
-        public decimal ReimbursementMileage { get; set; }
+        public decimal ReimbursementTotal { get; set; }
 
         public string Error { get; set; }
 
@@ -57,6 +55,7 @@ namespace TuroReceipts
             var costPerDay = this.Cost / timeSpan.Days;
             var turoFeesPerDay = this.TuroFees / timeSpan.Days;
             var earningsPerDay = this.Earnings / timeSpan.Days;
+            var reimbursementsPerDay = this.ReimbursementTotal / timeSpan.Days;
 
             var trips = new List<Trip>();
 
@@ -68,10 +67,11 @@ namespace TuroReceipts
             pickupMonthTrip.Cost = costPerDay * pickupMonthDays;
             pickupMonthTrip.TuroFees = turoFeesPerDay * pickupMonthDays;
             pickupMonthTrip.Earnings = earningsPerDay * pickupMonthDays;
+            pickupMonthTrip.ReimbursementTotal = reimbursementsPerDay * pickupMonthDays;
             trips.Add(pickupMonthTrip);
 
             var startMonth = new DateTime(this.PickupDate.Year, this.PickupDate.Month, 1).AddMonths(1); //Example: 8/1 + 1 month = 9/1
-            var endMonth = new DateTime(this.DropoffDate.Year, this.DropoffDate.Month, 1).AddMonths(-1); //Example: 10/1 - 1 month = 9/1
+            var endMonth = new DateTime(this.DropoffDate.Year, this.DropoffDate.Month, 1); //Example: 10/1
 
             var months = new List<DateTime>();
             var currentMonth = startMonth;
@@ -90,6 +90,7 @@ namespace TuroReceipts
                 trip.Cost = costPerDay * monthDays;
                 trip.TuroFees = turoFeesPerDay * monthDays;
                 trip.Earnings = earningsPerDay * monthDays;
+                trip.ReimbursementTotal = reimbursementsPerDay * monthDays;
                 trips.Add(trip);
             }
 
@@ -101,6 +102,7 @@ namespace TuroReceipts
             dropoffMonthTrip.Cost = costPerDay * dropoffMonthDays;
             dropoffMonthTrip.TuroFees = turoFeesPerDay * dropoffMonthDays;
             dropoffMonthTrip.Earnings = earningsPerDay * dropoffMonthDays;
+            dropoffMonthTrip.ReimbursementTotal = reimbursementsPerDay * dropoffMonthDays;
             trips.Add(dropoffMonthTrip);
 
             return trips;

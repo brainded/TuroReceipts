@@ -165,6 +165,7 @@ namespace TuroReceipts
 
             if (nextPage != null && receiptCount < maxReceipts)
             {
+                Console.WriteLine("Receipts written to CSV: {0}", receiptCount);
                 GetTrips(webDriver, csvWriter, receiptCount, maxReceipts, nextPage);
             }
         }
@@ -224,27 +225,14 @@ namespace TuroReceipts
                     return null;
                 }
 
-                var reimbursementTolls = 0m;
-                var reimbursementMileage = 0m;
+                var reimbursementTotal = 0m;
 
                 try
                 {
                     var reimbursementsElement = webDriver.FindElement(By.ClassName("reimbursements"));
-                    var lineItems = reimbursementsElement.FindElements(By.ClassName("line-item--longLabel"));
-                    foreach (var lineItem in lineItems)
-                    {
-                        if (lineItem.Text.Contains("tolls"))
-                        {
-                            var toll = lineItem.Text.Split(' ').Last();
-                            reimbursementTolls = ParseCurrency(toll);
-                        }
-
-                        if (lineItem.Text.Contains("additional miles driven"))
-                        {
-                            var miles = lineItem.Text.Split(' ').Last();
-                            reimbursementMileage = ParseCurrency(miles);
-                        }
-                    }
+                    var reimbursementTotalElement = reimbursementsElement.FindElements(By.ClassName("line-item")).Last();
+                    var valueSpan = reimbursementTotalElement.FindElements(By.TagName("span")).Last();
+                    reimbursementTotal = ParseCurrency(valueSpan.Text);
                 }
                 catch (Exception)
                 {
@@ -265,8 +253,7 @@ namespace TuroReceipts
                     Cost = costAmount,
                     TuroFees = turoFees,
                     Earnings = paymentAmount,
-                    ReimbursementMileage = reimbursementMileage,
-                    ReimbursementTolls = reimbursementTolls
+                    ReimbursementTotal = reimbursementTotal
                 };
             }
             catch(Exception exception)
