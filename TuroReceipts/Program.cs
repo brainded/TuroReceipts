@@ -17,6 +17,7 @@ namespace TuroReceipts
     {
         private const NumberStyles CurrencyStyles = NumberStyles.AllowCurrencySymbol | NumberStyles.Number | NumberStyles.AllowThousands;
         private const string TuroBaseUrl = "https://turo.com";
+        private static bool SplitTrips = false;
 
         static void Main(string[] args)
         {
@@ -29,6 +30,9 @@ namespace TuroReceipts
                 Console.ReadLine();
                 return;
             }
+
+            var splitTripsValue = ConfigurationManager.AppSettings["SplitTrips"];
+            bool.TryParse(splitTripsValue, out SplitTrips);
 
             Console.WriteLine("Enter the max receipts to fetch:");
             var maxReceiptsInput = Console.ReadLine();
@@ -136,7 +140,15 @@ namespace TuroReceipts
                 var trip = GetTrip(webDriver, tripSlug);
                 if (trip != null)
                 {
-                    trips.Add(trip);
+                    if (SplitTrips && trip.CanSplit())
+                    {
+                        var splitTrips = trip.Split();
+                        trips.AddRange(splitTrips);
+                    }
+                    else
+                    {
+                        trips.Add(trip);
+                    }
                 }
             }
 
@@ -245,8 +257,8 @@ namespace TuroReceipts
                 CarId = carId,
                 Car = car,
                 Status = "Completed",
-                PickupDateTime = ProcessReservationDateTime(pickup),
-                DropoffDateTime = ProcessReservationDateTime(dropoff),
+                PickupDate = ProcessReservationDateTime(pickup),
+                DropoffDate = ProcessReservationDateTime(dropoff),
                 Cost = costAmount,
                 TuroFees = turoFees,
                 Earnings = paymentAmount,
@@ -292,8 +304,8 @@ namespace TuroReceipts
                 CarId = carId,
                 Car = car,
                 Status = "Cancelled",
-                PickupDateTime = ProcessTripScheduleDateTime(pickup),
-                DropoffDateTime = ProcessTripScheduleDateTime(dropoff),
+                PickupDate = ProcessTripScheduleDateTime(pickup),
+                DropoffDate = ProcessTripScheduleDateTime(dropoff),
                 Earnings = earnings
             };
         }
@@ -303,12 +315,18 @@ namespace TuroReceipts
         /// </summary>
         /// <param name="webElement"></param>
         /// <returns></returns>
-        static string ProcessReservationDateTime(IWebElement webElement)
+        static DateTime ProcessReservationDateTime(IWebElement webElement)
         {
-            var date = webElement.FindElement(By.ClassName("scheduleDate")).Text;
-            var time = webElement.FindElement(By.ClassName("scheduleTime")).Text;
+            var dateText = webElement.FindElement(By.ClassName("scheduleDate")).Text;
 
-            return string.Format("{0} {1}", date, time);
+            var month = dateText.Substring(0, dateText.IndexOf(" "));
+            var monthInt = DateTimeFormatInfo.CurrentInfo.AbbreviatedMonthNames.ToList().IndexOf(month) + 1;
+
+            var day = dateText.Substring(dateText.IndexOf(" ") + 1);
+            var dayInt = int.Parse(day);
+
+            //TODO: Figure out how to get year
+            return new DateTime(DateTime.Now.Year, monthInt, dayInt);
         }
 
         /// <summary>
@@ -316,12 +334,19 @@ namespace TuroReceipts
         /// </summary>
         /// <param name="webElement">The web element.</param>
         /// <returns></returns>
-        static string ProcessTripScheduleDateTime(IWebElement webElement)
+        static DateTime ProcessTripScheduleDateTime(IWebElement webElement)
         {
-            var date = webElement.FindElement(By.ClassName("schedule-date")).Text;
-            var time = webElement.FindElement(By.ClassName("schedule-time")).Text;
+            var dateText = webElement.FindElement(By.ClassName("schedule-date")).Text;
+            dateText = dateText.Substring(dateText.IndexOf(",") + 2); //get rid of short day string and comma
 
-            return string.Format("{0} {1}", date, time);
+            var month = dateText.Substring(0, dateText.IndexOf(" "));
+            var monthInt = DateTimeFormatInfo.CurrentInfo.AbbreviatedMonthNames.ToList().IndexOf(month) + 1;
+
+            var day = dateText.Substring(dateText.IndexOf(" ") + 1);
+            var dayInt = int.Parse(day);
+
+            //TODO: Figure out how to get year
+            return new DateTime(DateTime.Now.Year, monthInt, dayInt);
         }
 
         /// <summary>

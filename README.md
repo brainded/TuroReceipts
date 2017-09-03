@@ -14,3 +14,7 @@ To get started
 - open the TuroReceipts.exe.config file with your favorite text editor and enter your login credentials and save
 - double click the exe and you will be prompted for the number of receipts to download
 - once done it will open a CSV file with the data scrapped from Turo
+
+## Issues
+
+Turo has no year on the reservation or receipt pages so I am still trying to figure out how to get that. As of right now it assumes current year.
