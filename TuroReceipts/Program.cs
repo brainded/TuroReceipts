@@ -48,6 +48,8 @@ namespace TuroReceipts
             using (TextWriter tr = new StreamWriter("TuroReceipts.csv"))
             {
                 var csvWriter = new CsvWriter(tr);
+                csvWriter.WriteHeader<Trip>();
+
                 GetTrips(webDriver, csvWriter, 0, maxReceipts);
             }
 
