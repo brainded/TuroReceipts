@@ -33,6 +33,8 @@ namespace TuroReceipts
 
         public decimal ReimbursementMileage { get; set; }
 
+        public string Error { get; set; }
+
         public bool CanSplit()
         {
             if (PickupDate.Month == DropoffDate.Month && 

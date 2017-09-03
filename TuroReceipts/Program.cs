@@ -181,90 +181,102 @@ namespace TuroReceipts
             Console.WriteLine("Navigating to {0}...", tripUrl);
             webDriver.Navigate().GoToUrl(tripUrl);
 
-            WebDriverWait wait = new WebDriverWait(webDriver, TimeSpan.FromSeconds(10));
-            wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
-            wait.PollingInterval = TimeSpan.FromMilliseconds(100);
-            wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
-
-            var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
-            var car = carElement.FindElement(By.TagName("div")).Text;
-            var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
-            var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
-
-            var receiptUrl = string.Format("{0}{1}/receipt/", TuroBaseUrl, reservationUrlSnippet);
-            Console.WriteLine("Navigating to {0}...", receiptUrl);
-            webDriver.Navigate().GoToUrl(receiptUrl);
-
-            var pickup = webDriver.FindElement(By.ClassName("reservationSummary-schedulePickUp"));
-            var dropoff = webDriver.FindElement(By.ClassName("reservationSummaryDropOff"));
-
-            var costElement = webDriver.FindElement(By.ClassName("cost-details"));
-            var cost = costElement.FindElement(By.ClassName("value")).Text;
-            var costAmount = ParseCurrency(cost);
-
-            var paymentElement = webDriver.FindElement(By.ClassName("payment-details"));
-
-            decimal paymentAmount = 0m;
-            decimal turoFees = 0m;
             try
             {
-                var payment = paymentElement.FindElement(By.ClassName("positive")).Text;
-                paymentAmount = ParseCurrency(payment);
+                WebDriverWait wait = new WebDriverWait(webDriver, TimeSpan.FromSeconds(10));
+                wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
+                wait.PollingInterval = TimeSpan.FromMilliseconds(100);
+                wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
 
-                var fees = paymentElement.FindElement(By.ClassName("negative")).Text;
-                turoFees = ParseCurrency(fees.Substring(1));
-            }
-            catch (Exception)
-            {
-                Console.WriteLine("Not included in earnings: {0}", receiptUrl);
-                return null;
-            }
+                var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
+                var car = carElement.FindElement(By.TagName("div")).Text;
+                var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
+                var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
 
-            var reimbursementTolls = 0m;
-            var reimbursementMileage = 0m;
+                var receiptUrl = string.Format("{0}{1}/receipt/", TuroBaseUrl, reservationUrlSnippet);
+                Console.WriteLine("Navigating to {0}...", receiptUrl);
+                webDriver.Navigate().GoToUrl(receiptUrl);
 
-            try
-            {
+                var pickup = webDriver.FindElement(By.ClassName("reservationSummary-schedulePickUp"));
+                var dropoff = webDriver.FindElement(By.ClassName("reservationSummaryDropOff"));
 
-                var reimbursementsElement = webDriver.FindElement(By.ClassName("reimbursements"));
-                var lineItems = reimbursementsElement.FindElements(By.ClassName("line-item--longLabel"));
-                foreach(var lineItem in lineItems)
+                var costElement = webDriver.FindElement(By.ClassName("cost-details"));
+                var cost = costElement.FindElement(By.ClassName("value")).Text;
+                var costAmount = ParseCurrency(cost);
+
+                var paymentElement = webDriver.FindElement(By.ClassName("payment-details"));
+
+                decimal paymentAmount = 0m;
+                decimal turoFees = 0m;
+                try
                 {
-                    if (lineItem.Text.Contains("tolls"))
-                    {
-                        var toll = lineItem.Text.Split(' ').Last();
-                        reimbursementTolls = ParseCurrency(toll);
-                    }
+                    var payment = paymentElement.FindElement(By.ClassName("positive")).Text;
+                    paymentAmount = ParseCurrency(payment);
 
-                    if (lineItem.Text.Contains("additional miles driven"))
+                    var fees = paymentElement.FindElement(By.ClassName("negative")).Text;
+                    turoFees = ParseCurrency(fees.Substring(1));
+                }
+                catch (Exception)
+                {
+                    Console.WriteLine("Not included in earnings: {0}", receiptUrl);
+                    return null;
+                }
+
+                var reimbursementTolls = 0m;
+                var reimbursementMileage = 0m;
+
+                try
+                {
+                    var reimbursementsElement = webDriver.FindElement(By.ClassName("reimbursements"));
+                    var lineItems = reimbursementsElement.FindElements(By.ClassName("line-item--longLabel"));
+                    foreach (var lineItem in lineItems)
                     {
-                        var miles = lineItem.Text.Split(' ').Last();
-                        reimbursementMileage = ParseCurrency(miles);
+                        if (lineItem.Text.Contains("tolls"))
+                        {
+                            var toll = lineItem.Text.Split(' ').Last();
+                            reimbursementTolls = ParseCurrency(toll);
+                        }
+
+                        if (lineItem.Text.Contains("additional miles driven"))
+                        {
+                            var miles = lineItem.Text.Split(' ').Last();
+                            reimbursementMileage = ParseCurrency(miles);
+                        }
                     }
                 }
-            }
-            catch(Exception)
-            {
-                Console.WriteLine("No reimbursements found: {0}", receiptUrl);
-            }
+                catch (Exception)
+                {
+                    Console.WriteLine("No reimbursements found: {0}", receiptUrl);
+                }
 
-            return new Trip()
+                return new Trip()
+                {
+                    ReservationId = reservationId,
+                    TripUrl = tripUrl,
+                    ReceiptUrl = receiptUrl,
+                    CarUrl = carUrl,
+                    CarId = carId,
+                    Car = car,
+                    Status = "Completed",
+                    PickupDate = ProcessReservationDateTime(pickup),
+                    DropoffDate = ProcessReservationDateTime(dropoff),
+                    Cost = costAmount,
+                    TuroFees = turoFees,
+                    Earnings = paymentAmount,
+                    ReimbursementMileage = reimbursementMileage,
+                    ReimbursementTolls = reimbursementTolls
+                };
+            }
+            catch(Exception exception)
             {
-                ReservationId = reservationId,
-                TripUrl = tripUrl,
-                ReceiptUrl = receiptUrl,
-                CarUrl = carUrl,
-                CarId = carId,
-                Car = car,
-                Status = "Completed",
-                PickupDate = ProcessReservationDateTime(pickup),
-                DropoffDate = ProcessReservationDateTime(dropoff),
-                Cost = costAmount,
-                TuroFees = turoFees,
-                Earnings = paymentAmount,
-                ReimbursementMileage = reimbursementMileage,
-                ReimbursementTolls = reimbursementTolls
-            };
+                return new Trip()
+                {
+                    ReservationId = reservationId,
+                    TripUrl = tripUrl,
+                    Status = "Error",
+                    Error = exception.Message
+                };
+            }
         }
 
         /// <summary>
@@ -280,34 +292,47 @@ namespace TuroReceipts
             Console.WriteLine("Navigating to {0}...", tripUrl);
             webDriver.Navigate().GoToUrl(tripUrl);
 
-            WebDriverWait wait = new WebDriverWait(webDriver, TimeSpan.FromSeconds(10));
-            wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
-            wait.PollingInterval = TimeSpan.FromMilliseconds(100);
-            wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
-
-            var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
-            var car = carElement.FindElement(By.TagName("div")).Text;
-            var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
-            var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
-
-            var pickup = webDriver.FindElement(By.ClassName("tripSchedule-startDate"));
-            var dropoff = webDriver.FindElement(By.ClassName("tripSchedule-endDate"));
-
-            var earninsText = webDriver.FindElement(By.ClassName("reservationDetails-totalEarnings")).Text;
-            var earnings = ParseCurrency(earninsText);
-
-            return new Trip()
+            try
             {
-                ReservationId = reservationId,
-                TripUrl = tripUrl,
-                CarUrl = carUrl,
-                CarId = carId,
-                Car = car,
-                Status = "Cancelled",
-                PickupDate = ProcessTripScheduleDateTime(pickup),
-                DropoffDate = ProcessTripScheduleDateTime(dropoff),
-                Earnings = earnings
-            };
+                WebDriverWait wait = new WebDriverWait(webDriver, TimeSpan.FromSeconds(10));
+                wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
+                wait.PollingInterval = TimeSpan.FromMilliseconds(100);
+                wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
+
+                var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
+                var car = carElement.FindElement(By.TagName("div")).Text;
+                var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
+                var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
+
+                var pickup = webDriver.FindElement(By.ClassName("tripSchedule-startDate"));
+                var dropoff = webDriver.FindElement(By.ClassName("tripSchedule-endDate"));
+
+                var earninsText = webDriver.FindElement(By.ClassName("reservationDetails-totalEarnings")).Text;
+                var earnings = ParseCurrency(earninsText);
+
+                return new Trip()
+                {
+                    ReservationId = reservationId,
+                    TripUrl = tripUrl,
+                    CarUrl = carUrl,
+                    CarId = carId,
+                    Car = car,
+                    Status = "Cancelled",
+                    PickupDate = ProcessTripScheduleDateTime(pickup),
+                    DropoffDate = ProcessTripScheduleDateTime(dropoff),
+                    Earnings = earnings
+                };
+            }
+            catch (Exception exception)
+            {
+                return new Trip()
+                {
+                    ReservationId = reservationId,
+                    TripUrl = tripUrl,
+                    Status = "Error",
+                    Error = exception.Message
+                };
+            }
         }
 
         /// <summary>
