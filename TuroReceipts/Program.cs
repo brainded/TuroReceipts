@@ -3,13 +3,11 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using System;
-using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Threading;
 
 namespace TuroReceipts
 {
@@ -46,26 +44,17 @@ namespace TuroReceipts
 
             IWebDriver webDriver = new ChromeDriver();
             Login(webDriver, username, password);
-            Thread.Sleep(1000);
-            var trips = GetTrips(webDriver, new List<Trip>(), maxReceipts);
+
+            using (TextWriter tr = new StreamWriter("TuroReceipts.csv"))
+            {
+                var csvWriter = new CsvWriter(tr);
+                GetTrips(webDriver, csvWriter, 0, maxReceipts);
+            }
+
+            var process = Process.Start("TuroReceipts.csv");
+
+            Console.WriteLine("Turo Receipts written to CSV");
             webDriver.Quit();
-
-            if (trips.Any())
-            {
-                using (TextWriter tr = new StreamWriter("TuroReceipts.csv"))
-                {
-                    var csvWriter = new CsvWriter(tr);
-                    csvWriter.WriteRecords(trips);
-                }
-
-                var process = Process.Start("TuroReceipts.csv");
-
-                Console.WriteLine("Turo Receipts written to CSV");
-            }
-            else
-            {
-                Console.WriteLine("No Trips found...");
-            }
 
             Console.WriteLine("Press any key to exit...");
             Console.ReadLine();
@@ -85,6 +74,11 @@ namespace TuroReceipts
             webDriver.FindElement(By.Name("password")).SendKeys(password);
 
             webDriver.FindElement(By.Id("submit")).Click();
+
+            WebDriverWait wait = new WebDriverWait(webDriver, TimeSpan.FromSeconds(10));
+            wait.IgnoreExceptionTypes(typeof(NoSuchElementException));
+            wait.PollingInterval = TimeSpan.FromMilliseconds(100);
+            wait.Until(x => x.FindElement(By.ClassName("dashboardActivityFeed-dividerText")));
         }
 
         /// <summary>
@@ -94,7 +88,7 @@ namespace TuroReceipts
         /// <param name="trips"></param>
         /// <param name="pageSlug"></param>
         /// <returns></returns>
-        static List<Trip> GetTrips(IWebDriver webDriver, List<Trip> trips, int maxReceipts, string pageSlug = null)
+        static void GetTrips(IWebDriver webDriver, CsvWriter csvWriter, int receiptCount, int maxReceipts, string pageSlug = null)
         {
             if (pageSlug == null)
             {
@@ -135,7 +129,7 @@ namespace TuroReceipts
 
             foreach (var tripSlug in tripSlugs)
             {
-                if (trips.Count >= maxReceipts) break;
+                if (receiptCount >= maxReceipts) break;
 
                 var trip = GetTrip(webDriver, tripSlug);
                 if (trip != null)
@@ -143,28 +137,36 @@ namespace TuroReceipts
                     if (SplitTrips && trip.CanSplit())
                     {
                         var splitTrips = trip.Split();
-                        trips.AddRange(splitTrips);
+                        foreach(var splitTrip in splitTrips)
+                        {
+                            csvWriter.WriteRecord<Trip>(splitTrip);
+                            receiptCount++;
+                        }
                     }
                     else
                     {
-                        trips.Add(trip);
+                        csvWriter.WriteRecord<Trip>(trip);
+                        receiptCount++;
                     }
                 }
             }
 
             foreach (var cancelledTripSlug in cancelledTripSlugs)
             {
-                if (trips.Count >= maxReceipts) break;
+                if (receiptCount >= maxReceipts) break;
 
                 var trip = ProcessCancelledTrip(webDriver, cancelledTripSlug);
                 if (trip != null)
                 {
-                    trips.Add(trip);
+                    csvWriter.WriteRecord<Trip>(trip);
+                    receiptCount++;
                 }
             }
 
-            if (nextPage != null && trips.Count < maxReceipts) return GetTrips(webDriver, trips, maxReceipts, nextPage);
-            return trips;
+            if (nextPage != null && receiptCount < maxReceipts)
+            {
+                GetTrips(webDriver, csvWriter, receiptCount, maxReceipts, nextPage);
+            }
         }
 
         /// <summary>
