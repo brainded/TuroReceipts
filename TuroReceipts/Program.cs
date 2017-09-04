@@ -16,6 +16,7 @@ namespace TuroReceipts
         private const NumberStyles CurrencyStyles = NumberStyles.AllowCurrencySymbol | NumberStyles.Number | NumberStyles.AllowThousands;
         private const string TuroBaseUrl = "https://turo.com";
         private static bool SplitTrips = false;
+        private static bool ChromeHeadless = false;
 
         static void Main(string[] args)
         {
@@ -42,7 +43,15 @@ namespace TuroReceipts
                 maxReceipts = 10;
             }
 
-            IWebDriver webDriver = new ChromeDriver();
+            ChromeOptions options = new ChromeOptions();
+            var chromeHeadlessValue = ConfigurationManager.AppSettings["ChromeHeadless"];
+            bool.TryParse(chromeHeadlessValue, out ChromeHeadless);
+            if (ChromeHeadless)
+            {
+                options.AddArgument("--headless");
+            }
+
+            IWebDriver webDriver = new ChromeDriver(options);
             Login(webDriver, username, password);
 
             using (TextWriter tr = new StreamWriter("TuroReceipts.csv"))
