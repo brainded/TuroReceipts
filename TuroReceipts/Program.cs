@@ -1,12 +1,9 @@
-﻿using CsvHelper;
-using OpenQA.Selenium;
+﻿using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using System;
 using System.Configuration;
-using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 
 namespace TuroReceipts
@@ -20,6 +17,8 @@ namespace TuroReceipts
 
         static void Main(string[] args)
         {
+            Database.Init();
+
             var username = ConfigurationManager.AppSettings["Username"];
             var password = ConfigurationManager.AppSettings["Password"];
 
@@ -33,14 +32,14 @@ namespace TuroReceipts
             var splitTripsValue = ConfigurationManager.AppSettings["SplitTrips"];
             bool.TryParse(splitTripsValue, out SplitTrips);
 
-            Console.WriteLine("Enter the max receipts to fetch:");
-            var maxReceiptsInput = Console.ReadLine();
+            Console.WriteLine("What is the minimum date you would like to go back to? (MM/DD/YYYY)");
+            var minDateInput = Console.ReadLine();
 
-            int maxReceipts = 0;
-            if (!int.TryParse(maxReceiptsInput, out maxReceipts))
+            DateTime minDate = DateTime.Now.Date;
+            if (!DateTime.TryParse(minDateInput, out minDate))
             {
-                Console.WriteLine("Defaulting to 10...");
-                maxReceipts = 10;
+                minDate = DateTime.Now.Date.AddDays(-7);
+                Console.WriteLine("Defaulting to {0}...", minDate);
             }
 
             ChromeOptions options = new ChromeOptions();
@@ -54,19 +53,13 @@ namespace TuroReceipts
             IWebDriver webDriver = new ChromeDriver(options);
             Login(webDriver, username, password);
 
-            using (TextWriter tr = new StreamWriter("TuroReceipts.csv"))
-            {
-                var csvWriter = new CsvWriter(tr);
-                csvWriter.WriteHeader<Trip>();
+            var carRepository = new CarRepository();
+            var tripRepository = new TripRepository();
 
-                GetTrips(webDriver, csvWriter, 0, maxReceipts);
-            }
-
-            var process = Process.Start("TuroReceipts.csv");
-
-            Console.WriteLine("Turo Receipts written to CSV");
+            GetTrips(webDriver, carRepository, tripRepository, 0, minDate);
             webDriver.Quit();
 
+            Console.WriteLine("Turo Receipts written to Sqlite Db");
             Console.WriteLine("Press any key to exit...");
             Console.ReadLine();
         }
@@ -99,7 +92,13 @@ namespace TuroReceipts
         /// <param name="trips"></param>
         /// <param name="pageSlug"></param>
         /// <returns></returns>
-        static void GetTrips(IWebDriver webDriver, CsvWriter csvWriter, int receiptCount, int maxReceipts, string pageSlug = null)
+        static void GetTrips(
+            IWebDriver webDriver, 
+            CarRepository carRepository, 
+            TripRepository tripRepository, 
+            int receiptCount, 
+            DateTime minDate, 
+            string pageSlug = null)
         {
             if (pageSlug == null)
             {
@@ -138,46 +137,30 @@ namespace TuroReceipts
                 .Select(x => x.FindElement(By.ClassName("reservation")).GetAttribute("data-href"))
                 .ToList();
 
+            bool stopProcessing = false;
             foreach (var tripSlug in tripSlugs)
             {
-                if (receiptCount >= maxReceipts) break;
-
-                var trip = GetTrip(webDriver, tripSlug);
-                if (trip != null)
+                var date = GetTrip(webDriver, carRepository, tripRepository, tripSlug);
+                if (date.HasValue && date <= minDate)
                 {
-                    if (SplitTrips && trip.CanSplit())
-                    {
-                        var splitTrips = trip.Split();
-                        foreach(var splitTrip in splitTrips)
-                        {
-                            csvWriter.WriteRecord<Trip>(splitTrip);
-                            receiptCount++;
-                        }
-                    }
-                    else
-                    {
-                        csvWriter.WriteRecord<Trip>(trip);
-                        receiptCount++;
-                    }
+                    stopProcessing = true;
+                    break;
                 }
             }
 
             foreach (var cancelledTripSlug in cancelledTripSlugs)
             {
-                if (receiptCount >= maxReceipts) break;
-
-                var trip = ProcessCancelledTrip(webDriver, cancelledTripSlug);
-                if (trip != null)
+                var date = ProcessCancelledTrip(webDriver, carRepository, tripRepository, cancelledTripSlug);
+                if (date.HasValue && date <= minDate)
                 {
-                    csvWriter.WriteRecord<Trip>(trip);
-                    receiptCount++;
+                    stopProcessing = true;
+                    break;
                 }
             }
 
-            if (nextPage != null && receiptCount < maxReceipts)
+            if (nextPage != null && !stopProcessing)
             {
-                Console.WriteLine("Receipts written to CSV: {0}", receiptCount);
-                GetTrips(webDriver, csvWriter, receiptCount, maxReceipts, nextPage);
+                GetTrips(webDriver, carRepository, tripRepository, receiptCount, minDate, nextPage);
             }
         }
 
@@ -187,9 +170,18 @@ namespace TuroReceipts
         /// <param name="webDriver"></param>
         /// <param name="reservationUrlSnippet"></param>
         /// <returns></returns>
-        static Trip GetTrip(IWebDriver webDriver, string reservationUrlSnippet)
+        static DateTime? GetTrip(
+            IWebDriver webDriver,
+            CarRepository carRepository,
+            TripRepository tripRepository,
+            string reservationUrlSnippet)
         {
-            var reservationId = reservationUrlSnippet.Substring(reservationUrlSnippet.LastIndexOf("/") + 1);
+            var reservationIdString = reservationUrlSnippet.Substring(reservationUrlSnippet.LastIndexOf("/") + 1);
+            var reservationId = int.Parse(reservationIdString);
+
+            var existingTrip = tripRepository.Select(reservationId);
+            //if found and no error just pass back the date
+            if (existingTrip != null && existingTrip.Error == null) return existingTrip.PickupDate;
 
             var tripUrl = string.Format("{0}{1}", TuroBaseUrl, reservationUrlSnippet);
             Console.WriteLine("Navigating to {0}...", tripUrl);
@@ -203,9 +195,10 @@ namespace TuroReceipts
                 wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
 
                 var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
-                var car = carElement.FindElement(By.TagName("div")).Text;
+                var makeModel = carElement.FindElement(By.TagName("div")).Text;
                 var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
-                var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
+                var carIdString = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
+                var carId = int.Parse(carIdString);
 
                 var receiptUrl = string.Format("{0}{1}/receipt/", TuroBaseUrl, reservationUrlSnippet);
                 Console.WriteLine("Navigating to {0}...", receiptUrl);
@@ -250,15 +243,27 @@ namespace TuroReceipts
                     Console.WriteLine("No reimbursements found: {0}", receiptUrl);
                 }
 
-                return new Trip()
+                //if the car doesnt exist
+                if (!carRepository.Exists(carId))
+                {
+                    //add it
+                    var car = new Car()
+                    {
+                        CarId = carId,
+                        CarUrl = carUrl,
+                        MakeModel = makeModel,
+                    };
+
+                    carRepository.Insert(car);
+                }
+
+                var trip = new Trip()
                 {
                     ReservationId = reservationId,
                     TripUrl = tripUrl,
                     ReceiptUrl = receiptUrl,
-                    CarUrl = carUrl,
-                    CarId = carId,
-                    Car = car,
                     Status = "Completed",
+                    CarId = carId,
                     PickupDate = ProcessReservationDateTime(pickup),
                     DropoffDate = ProcessReservationDateTime(dropoff),
                     Cost = costAmount,
@@ -266,16 +271,43 @@ namespace TuroReceipts
                     Earnings = paymentAmount,
                     ReimbursementTotal = reimbursementTotal
                 };
+
+                //if we have an existing trip
+                if (existingTrip != null)
+                {
+                    //update it
+                    tripRepository.Update(trip);
+                }
+                else
+                {
+                    //otherwise add it
+                    tripRepository.Insert(trip);
+                }
+
+                return trip.PickupDate;
             }
             catch(Exception exception)
             {
-                return new Trip()
+                var trip = new Trip()
                 {
                     ReservationId = reservationId,
                     TripUrl = tripUrl,
                     Status = "Error",
                     Error = exception.Message
                 };
+
+                //if we have an existing trip
+                if (existingTrip != null)
+                {
+                    //update it
+                    tripRepository.Update(trip);
+                }
+                else
+                {
+                    tripRepository.Insert(trip);
+                }
+
+                return null;
             }
         }
 
@@ -284,9 +316,18 @@ namespace TuroReceipts
         /// </summary>
         /// <param name="webElement"></param>
         /// <returns></returns>
-        static Trip ProcessCancelledTrip(IWebDriver webDriver, string reservationUrlSnippet)
+        static DateTime? ProcessCancelledTrip(
+            IWebDriver webDriver,
+            CarRepository carRepository,
+            TripRepository tripRepository, 
+            string reservationUrlSnippet)
         {
-            var reservationId = reservationUrlSnippet.Substring(reservationUrlSnippet.LastIndexOf("/") + 1);
+            var reservationIdString = reservationUrlSnippet.Substring(reservationUrlSnippet.LastIndexOf("/") + 1);
+            var reservationId = int.Parse(reservationIdString);
+
+            var existingTrip = tripRepository.Select(reservationId);
+            //if found and no error just pass back the date
+            if (existingTrip != null && existingTrip.Error == null) return existingTrip.PickupDate;
 
             var tripUrl = string.Format("{0}{1}", TuroBaseUrl, reservationUrlSnippet);
             Console.WriteLine("Navigating to {0}...", tripUrl);
@@ -300,9 +341,10 @@ namespace TuroReceipts
                 wait.Until(x => x.FindElement(By.ClassName("vehicleDetailsHeader-text")));
 
                 var carElement = webDriver.FindElement(By.ClassName("vehicleDetailsHeader-text"));
-                var car = carElement.FindElement(By.TagName("div")).Text;
+                var makeModel = carElement.FindElement(By.TagName("div")).Text;
                 var carUrl = carElement.FindElement(By.TagName("a")).GetAttribute("href");
-                var carId = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
+                var carIdString = carUrl.Substring(carUrl.LastIndexOf("/") + 1);
+                var carId = int.Parse(carIdString);
 
                 var pickup = webDriver.FindElement(By.ClassName("tripSchedule-startDate"));
                 var dropoff = webDriver.FindElement(By.ClassName("tripSchedule-endDate"));
@@ -310,28 +352,67 @@ namespace TuroReceipts
                 var earninsText = webDriver.FindElement(By.ClassName("reservationDetails-totalEarnings")).Text;
                 var earnings = ParseCurrency(earninsText);
 
-                return new Trip()
+                //if the car doesnt exist
+                if (!carRepository.Exists(carId))
+                {
+                    //add it
+                    var car = new Car()
+                    {
+                        CarId = carId,
+                        CarUrl = carUrl,
+                        MakeModel = makeModel,
+                    };
+
+                    carRepository.Insert(car);
+                }
+
+                var trip = new Trip()
                 {
                     ReservationId = reservationId,
                     TripUrl = tripUrl,
-                    CarUrl = carUrl,
-                    CarId = carId,
-                    Car = car,
                     Status = "Cancelled",
+                    CarId = carId,
                     PickupDate = ProcessTripScheduleDateTime(pickup),
                     DropoffDate = ProcessTripScheduleDateTime(dropoff),
                     Earnings = earnings
                 };
+
+                //if we have an existing trip
+                if (existingTrip != null)
+                {
+                    //update it
+                    tripRepository.Update(trip);
+                }
+                else
+                {
+                    //otherwise add it
+                    tripRepository.Insert(trip);
+                }
+
+                return trip.PickupDate;
             }
             catch (Exception exception)
             {
-                return new Trip()
+                var trip = new Trip()
                 {
                     ReservationId = reservationId,
                     TripUrl = tripUrl,
                     Status = "Error",
                     Error = exception.Message
                 };
+
+                //if we have an existing trip
+                if (existingTrip != null)
+                {
+                    //update it
+                    tripRepository.Update(trip);
+                }
+                else
+                {
+                    tripRepository.Insert(trip);
+                }
+
+                return null;
             }
         }
 

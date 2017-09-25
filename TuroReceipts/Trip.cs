@@ -3,21 +3,17 @@ using System.Collections.Generic;
 
 namespace TuroReceipts
 {
-    class Trip
+    public class Trip
     {
-        public string ReservationId { get; set; }
+        public int ReservationId { get; set; }
 
         public string TripUrl { get; set; }
 
         public string ReceiptUrl { get; set; }
 
-        public string CarUrl { get; set; }
-
-        public string CarId { get; set; }
-
-        public string Car { get; set; }
-
         public string Status { get; set; }
+
+        public int CarId { get; set; }
 
         public DateTime PickupDate { get; set; }
 
@@ -115,9 +111,6 @@ namespace TuroReceipts
                 ReservationId = this.ReservationId,
                 TripUrl = this.TripUrl,
                 ReceiptUrl = this.ReceiptUrl,
-                CarUrl = this.CarUrl,
-                CarId = this.CarId,
-                Car = this.Car,
                 Status = this.Status
             };
         }
